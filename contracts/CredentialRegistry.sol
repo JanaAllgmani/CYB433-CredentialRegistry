@@ -146,5 +146,44 @@ contract CredentialRegistry is AccessControl, Pausable {
     }
 
     // ===== Part 3: Revoke & Verify =====
+    error NotOriginalIssuer(bytes32 credentialHash, address caller);
+    error CredentialNotActive(bytes32 credentialHash);
+        /// @notice The university that issued a credential withdraws it.
+    /// @param reasonHash Hash of the reason (kept off-chain for privacy).
+    function revokeCredential(bytes32 credentialHash, bytes32 reasonHash)
+        external
+        onlyRole(ISSUER_ROLE)
+        whenNotPaused
+    {
+        Credential storage c = _credentials[credentialHash];
 
+        // 1) The credential must exist
+        if (c.status == Status.None) revert CredentialNotFound(credentialHash);
+
+        // 2) Only the original issuer can revoke it
+        if (c.issuer != msg.sender) revert NotOriginalIssuer(credentialHash, msg.sender);
+
+        // 3) It must still be active
+        if (c.status != Status.Active) revert CredentialNotActive(credentialHash);
+
+        // 4) Change the state and record it
+        c.status = Status.Revoked;
+        emit CredentialRevoked(credentialHash, msg.sender, reasonHash);
+    }
+        /// @notice Anyone can check a credential. Expired is calculated here, never stored.
+    function verifyCredential(bytes32 credentialHash)
+        external
+        view
+        returns (bool isValid, Status status, address issuer, uint40 expiresAt)
+    {
+        Credential memory c = _credentials[credentialHash];
+        status = c.status;
+
+        // Check whether an active credential has expired
+        if (status == Status.Active && c.expiresAt != 0 && block.timestamp >= c.expiresAt) {
+            status = Status.Expired;
+        }
+
+        return (status == Status.Active, status, c.issuer, c.expiresAt);
+    }
 }
